@@ -1,4 +1,3 @@
-from matplotlib import pyplot as plt
 import numpy as np
 
 def clamp(x, a, b):
