@@ -368,15 +368,27 @@ class AbsBinarySignGradFn(Function):
     """
 
     @staticmethod
-    def forward(ctx, x: Tensor) -> Tensor:
-        ctx.save_for_backward(binary_sign(x).type(torch.int8))  # save some memory
+    def forward(ctx, x: Tensor , clip_val  ,num_bits, layerwise) -> Tensor:
+        ctx.save_for_backward(binary_sign(x).type(torch.int8),delta)  # save some memory
         y = torch.abs(x)
         return y
 
     @staticmethod
     def backward(ctx, grad_y: Tensor) -> Tensor:
-        binary_sign, = ctx.saved_tensors
-        return binary_sign.float() * grad_y
+        binary_sign, delta = ctx.saved_tensors
+        grad_input = binary_sign.clone()
+        
+        #clip
+        grad_input[input.ge(clip_val[1])] = 0
+        grad_input[input.le(clip_val[0])] = 0
+
+         # -----BEGIN INTWise Estimator-----
+        grad_mat = math.exp(-T) + torch.exp(-T * delta) * T / (1 + torch.exp(-T * delta)) ** 2
+        grad_input = grad_input * grad_mat
+        # -----END INTWise Estimator-----
+
+        return grad_input.float()
+        #return binary_sign.float() * grad_y
 
     @staticmethod
     def symbolic(g, x: Tensor):
