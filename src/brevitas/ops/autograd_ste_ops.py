@@ -70,7 +70,6 @@ class ScalarClampSteFn(Function):
         y = g.op('Clip', x, torch.tensor(min_val), torch.tensor(max_val))
         return y
 
-
 class ScalarClampMinSteFn(Function):
     """
     Autograd function that implements ``torch.clamp_min`` with a straight-through gradient estimator
@@ -114,30 +113,12 @@ class TensorClampSteFn(Function):
 
     @staticmethod
     def forward(ctx, x: Tensor, min_val: Tensor, max_val: Tensor) -> Tensor:
-        
         y = tensor_clamp(x, min_val, max_val)
         return y
 
     @staticmethod
     def backward(ctx, grad_y: Tensor) -> Tuple[Tensor, None, None]:
-
-        # retrive data
-        input, delta, min_val , max_val = ctx.saved_tensors
-        grad_input = grad_y.clone()
-        grad_input[input.ge(min_val)] = 0
-        grad_input[input.le(max_val)] = 0
-
-         # -----BEGIN INTWise Estimator-----
-
-        # single hump approximation
-        grad_mat = math.exp(-T) + torch.exp(-T * delta) * T / (1 + torch.exp(-T * delta)) ** 2
-
-        # element-wise product
-        grad_input = grad_input * grad_mat
-
-        # -----END INTWise Estimator-----
-        
-        return grad_input, None, None
+        return grad_y, None, None
 
     @staticmethod
     def symbolic(g, x: Tensor, min_val: Tensor, max_val: Tensor):
@@ -234,7 +215,7 @@ class DPURoundSteFn(Function):
     @staticmethod
     def symbolic(g, x: Tensor):
         raise NotImplementedError
-
+# no1 will use this =/
 
 class CeilSteFn(Function):
     """
