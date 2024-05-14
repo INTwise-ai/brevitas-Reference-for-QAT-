@@ -115,22 +115,8 @@ class TensorClampSteFn(Function):
     @staticmethod
     def forward(ctx, x: Tensor, min_val: Tensor, max_val: Tensor) -> Tensor:
         
-        num_bits = 8 # int8
-        max_input = torch.max(torch.abs(x)).expand_as(x)
-        
-        s = (2 ** (num_bits - 1) - 1) / (max_input + 1e-6)
-        input_scaled = x * s
-        output = torch.round(input_scaled).div(s + 1e-6)
-
-        # -----BEGIN INTWise Estimator-----
-        delta = input_scaled - torch.floor(input_scaled) - 0.5
-
-        ctx.save_for_backward(input, delta, min_val, max_val) # save for later use
-        # -----END INTWise Estimator-----
-
-        # y = tensor_clamp(x, min_val, max_val)
-        # return y
-        return output
+        y = tensor_clamp(x, min_val, max_val)
+        return y
 
     @staticmethod
     def backward(ctx, grad_y: Tensor) -> Tuple[Tensor, None, None]:
@@ -264,11 +250,18 @@ class CeilSteFn(Function):
     @staticmethod
     def forward(ctx, x: Tensor) -> Tensor:
         y = torch.ceil(x)
+        delta = x - torch.floor(x) + 1
+        ctx.save_for_backward(delta) # save for later use
         return y
 
     @staticmethod
-    def backward(ctx, grad_y: Tensor) -> Tensor:
-        return grad_y
+    def backward(ctx, grad_input: Tensor) -> Tensor:
+        # -----BEGIN INTWise Estimator-----
+        delta = ctx.saved_tensors
+        grad_mat = math.exp(-T) + torch.exp(-T * delta) * T / (1 + torch.exp(-T * delta)) ** 2 
+        grad_input = grad_input * grad_mat
+        # -----END INTWise Estimator-----
+        return grad_input
 
     @staticmethod
     def symbolic(g, x: Tensor):
@@ -290,11 +283,18 @@ class FloorSteFn(Function):
     @staticmethod
     def forward(ctx, x: Tensor) -> Tensor:
         y = torch.floor(x)
+        delta = x - torch.floor(x)
+        ctx.save_for_backward(delta) # save for later use
         return y
 
     @staticmethod
-    def backward(ctx, grad_y: Tensor) -> Tensor:
-        return grad_y
+    def backward(ctx, grad_input: Tensor) -> Tensor:
+         # -----BEGIN INTWise Estimator-----
+        delta = ctx.saved_tensors
+        grad_mat = math.exp(-T) + torch.exp(-T * delta) * T / (1 + torch.exp(-T * delta)) ** 2 
+        grad_input = grad_input * grad_mat
+        # -----END INTWise Estimator-----
+        return grad_input
 
     @staticmethod
     def symbolic(g, x: Tensor):
@@ -374,11 +374,21 @@ class RoundSteFn(Function):
     @staticmethod
     def forward(ctx, x: Tensor) -> Tensor:
         y = torch.round(x)
+        delta = x - torch.floor(x) + 0.5
+        ctx.save_for_backward(delta) # save for later use
+        # -----END INTWise Estimator-----
+               
         return y
 
     @staticmethod
-    def backward(ctx, grad_y: Tensor) -> Tensor:
-        return grad_y
+    def backward(ctx, grad_input: Tensor) -> Tensor:
+
+         # -----BEGIN INTWise Estimator-----
+        delta = ctx.saved_tensors
+        grad_mat = math.exp(-T) + torch.exp(-T * delta) * T / (1 + torch.exp(-T * delta)) ** 2 
+        grad_input = grad_input * grad_mat
+        # -----END INTWise Estimator-----
+        return grad_input
 
     @staticmethod
     def symbolic(g, x: Tensor):
@@ -411,13 +421,10 @@ class AbsBinarySignGradFn(Function):
         grad_input = binary_sign.clone()
         
         #clip
-        grad_input[input.ge(clip_val[1])] = 0
+        grad_input[input.ge()] = 0
         grad_input[input.le(clip_val[0])] = 0
 
-         # -----BEGIN INTWise Estimator-----
-        grad_mat = math.exp(-T) + torch.exp(-T * delta) * T / (1 + torch.exp(-T * delta)) ** 2
-        grad_input = grad_input * grad_mat
-        # -----END INTWise Estimator-----
+        
 
         return grad_input.float()
         #return binary_sign.float() * grad_y
