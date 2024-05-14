@@ -114,12 +114,44 @@ class TensorClampSteFn(Function):
 
     @staticmethod
     def forward(ctx, x: Tensor, min_val: Tensor, max_val: Tensor) -> Tensor:
-        y = tensor_clamp(x, min_val, max_val)
-        return y
+        
+        num_bits = 8 # int8
+        max_input = torch.max(torch.abs(x)).expand_as(x)
+        
+        s = (2 ** (num_bits - 1) - 1) / (max_input + 1e-6)
+        input_scaled = x * s
+        output = torch.round(input_scaled).div(s + 1e-6)
+
+        # -----BEGIN INTWise Estimator-----
+        delta = input_scaled - torch.floor(input_scaled) - 0.5
+
+        ctx.save_for_backward(input, delta, min_val, max_val) # save for later use
+        # -----END INTWise Estimator-----
+
+        # y = tensor_clamp(x, min_val, max_val)
+        # return y
+        return output
 
     @staticmethod
     def backward(ctx, grad_y: Tensor) -> Tuple[Tensor, None, None]:
-        return grad_y, None, None
+
+        # retrive data
+        input, delta, min_val , max_val = ctx.saved_tensors
+        grad_input = grad_y.clone()
+        grad_input[input.ge(min_val)] = 0
+        grad_input[input.le(max_val)] = 0
+
+         # -----BEGIN INTWise Estimator-----
+
+        # single hump approximation
+        grad_mat = math.exp(-T) + torch.exp(-T * delta) * T / (1 + torch.exp(-T * delta)) ** 2
+
+        # element-wise product
+        grad_input = grad_input * grad_mat
+
+        # -----END INTWise Estimator-----
+        
+        return grad_input, None, None
 
     @staticmethod
     def symbolic(g, x: Tensor, min_val: Tensor, max_val: Tensor):
